@@ -7,7 +7,6 @@
 # Icon must end with two \r
 Icon
 
-
 # Thumbnails
 ._*
 
@@ -38,6 +37,9 @@ Temporary Items
 *.so
 *.dylib
 
+# Build directories
+build/
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -49,3 +51,13 @@ vendor/
 
 # Go workspace file
 go.work
+
+## ------------------------------
+# Private Resources
+resources/
+
+!.gitkeep
+!**/.gitkeep
+
+# Ignore logs
+*.log
