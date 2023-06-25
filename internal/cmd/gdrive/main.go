@@ -13,4 +13,5 @@ var GDriveCmd = &cobra.Command{
 func init() {
 	// Here you will define your flags and configuration settings.
 	GDriveCmd.AddCommand(GDriveAuthCmd)
+	GDriveCmd.AddCommand(GDriveSyncCmd)
 }
