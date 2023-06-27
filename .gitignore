@@ -54,10 +54,10 @@ go.work
 
 ## ------------------------------
 # Private Resources
-resources/
-
-!.gitkeep
-!**/.gitkeep
+resources/*
 
 # Ignore logs
 *.log
+
+# keep gitkeep
+!**/.gitkeep
