@@ -11,9 +11,10 @@ import (
 
 type Syncable struct {
 	gorm.Model
-	LocalPath  string
-	GDrivePath string
-	IsFolder   bool
+	LocalPath    string
+	GDrivePath   string
+	GDriveFileId string
+	IsFolder     bool
 }
 
 type DB struct {
