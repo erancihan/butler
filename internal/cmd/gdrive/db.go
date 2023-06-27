@@ -37,6 +37,15 @@ func NewDB(options DBOptions) *DB {
 		dbpath = filepath.Join(homedir, ".config", "butler", "gdrive.db")
 	}
 
+	// check if the directory exists
+	if _, err := os.Stat(filepath.Dir(dbpath)); os.IsNotExist(err) {
+		// create the directory
+		err := os.MkdirAll(filepath.Dir(dbpath), 0755)
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
+
 	db, err := gorm.Open(sqlite.Open(dbpath), &gorm.Config{})
 	if err != nil {
 		log.Fatalln("failed to connect database")
