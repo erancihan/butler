@@ -27,6 +27,16 @@ var GDriveAuthCmd = &cobra.Command{
 }
 
 func GDriveAuthCommand(cmd *cobra.Command, args []string) {
+	client, ctx := GetGDriveClient()
+
+	// Test creating a new GDrive client
+	_, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		log.Fatalf("Unable to retrieve Drive client: %v", err)
+	}
+}
+
+func GetGDriveClient() (*http.Client, context.Context) {
 	ctx := context.Background()
 	b, err := os.ReadFile("resources/credentials.json")
 	if err != nil {
@@ -34,17 +44,13 @@ func GDriveAuthCommand(cmd *cobra.Command, args []string) {
 	}
 
 	// If modifying these scopes, delete your previously saved "token.json".
-	config, err := google.ConfigFromJSON(b, drive.DriveMetadataReadonlyScope)
+	config, err := google.ConfigFromJSON(b, drive.DriveScope)
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to config: %v", err)
 	}
 	client := getClient(config)
 
-	// Test creating a new GDrive client
-	_, err = drive.NewService(ctx, option.WithHTTPClient(client))
-	if err != nil {
-		log.Fatalf("Unable to retrieve Drive client: %v", err)
-	}
+	return client, ctx
 }
 
 // Retrieves a token from a local file.
@@ -57,6 +63,10 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 	tok := &oauth2.Token{}
 	err = json.NewDecoder(f).Decode(tok)
 	return tok, err
+}
+
+func GetTokenFromFile(file string) (*oauth2.Token, error) {
+	return tokenFromFile(file)
 }
 
 // Request a token from the web, then returns the retrieved token.
@@ -134,4 +144,14 @@ func getClient(config *oauth2.Config) *http.Client {
 	}
 
 	return config.Client(context.Background(), tok)
+}
+
+func GetClient(config *oauth2.Config) *http.Client {
+	filename := "resources/token.json"
+	token, err := GetTokenFromFile(filename)
+	if err != nil {
+		log.Fatalf("Unable to retrieve token from file %v", err)
+	}
+
+	return config.Client(context.Background(), token)
 }
