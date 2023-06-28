@@ -15,7 +15,11 @@ var GDriveSyncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync with Google Drive",
 	Long:  `Sync with Google Drive`,
-	Run:   GDriveSyncCommand,
+	Run:   newCommand(),
+}
+
+type command struct {
+	validate bool
 }
 
 func init() {
@@ -23,9 +27,23 @@ func init() {
 	GDriveSyncAddCmd.Flags().StringP("remote", "g", "", "GDrive path to sync to")
 
 	GDriveSyncCmd.AddCommand(GDriveSyncAddCmd)
+	GDriveSyncCmd.Flags().Bool("validate", false, "Validate syncable paths")
 }
 
-func GDriveSyncCommand(cmd *cobra.Command, args []string) {
+func newCommand() func(cmd *cobra.Command, args []string) {
+	c := &command{}
+
+	return c.GDriveSyncCommand
+}
+
+func (c *command) GDriveSyncCommand(cmd *cobra.Command, args []string) {
+	var err error
+
+	c.validate, err = cmd.Flags().GetBool("validate")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 	client, ctx := GetGDriveClient()
 
 	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
@@ -46,19 +64,19 @@ func GDriveSyncCommand(cmd *cobra.Command, args []string) {
 			var syncable Syncable
 			db.ScanRows(rows, &syncable)
 
-			processSyncable(tx, srv, &syncable)
+			c.processSyncable(tx, srv, &syncable)
 		}
 	}
 	tx.Commit()
 }
 
-func processSyncable(tx *gorm.DB, srv *drive.Service, syncable *Syncable) {
+func (c *command) processSyncable(tx *gorm.DB, srv *drive.Service, syncable *Syncable) {
 	log.Printf("Syncing %s to %s\n", syncable.LocalPath, syncable.GDrivePath)
 
-	if syncable.GDriveFileId == "" && syncable.IsFolder {
+	if (syncable.GDriveFileId == "" && syncable.IsFolder) || c.validate {
 		// create folders to store files in
 		log.Println("Creating folder")
-		driveCreateFolder(srv, syncable)
+		c.driveCreateFolder(srv, syncable)
 
 		tx.Save(&syncable)
 	}
@@ -92,7 +110,7 @@ func driveUploadFile(srv *drive.Service, src string, dest string) {
 
 }
 
-func driveCreateFolder(srv *drive.Service, syncable *Syncable) {
+func (c *command) driveCreateFolder(srv *drive.Service, syncable *Syncable) {
 	// get drive path
 	gdpath := syncable.GDrivePath
 
@@ -112,6 +130,7 @@ func driveCreateFolder(srv *drive.Service, syncable *Syncable) {
 		if i > 0 {
 			q += " and '" + parent + "' in parents"
 		}
+		q += " and trashed=false"
 
 		response, err := srv.Files.List().Q(q).Do()
 		if err != nil {
@@ -130,6 +149,10 @@ func driveCreateFolder(srv *drive.Service, syncable *Syncable) {
 			Parents:  []string{parent},
 			MimeType: "application/vnd.google-apps.folder",
 		}
+		if folder == "butler" && (i == 0 || i == 1) {
+			file.FolderColorRgb = "#4985e7"
+		}
+
 		res, err := srv.Files.Create(file).Do()
 		if err != nil {
 			log.Fatalln(err)
