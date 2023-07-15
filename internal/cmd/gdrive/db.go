@@ -9,12 +9,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// this is the entry that the user sets
 type Syncable struct {
 	gorm.Model
 	LocalPath    string
 	GDrivePath   string
 	GDriveFileId string
 	IsFolder     bool
+}
+
+// this is the entry that is created by the program will always be a file.
+//
+// this is the entry that will be kept track of.
+type SyncableItem struct {
+	gorm.Model
+
+	LocalPath    string
+	GDrivePath   string
+	GDriveFileId string
+
+	SyncableId int
+	Syncable   Syncable
 }
 
 type DB struct {
@@ -52,9 +67,10 @@ func NewDB(options DBOptions) *DB {
 		log.Fatalln("failed to connect database")
 	}
 
-	if !options.ShouldMigrate {
+	if options.ShouldMigrate {
 		// Migrate the schema
 		db.AutoMigrate(&Syncable{})
+		db.AutoMigrate(&SyncableItem{})
 	}
 
 	return &DB{
