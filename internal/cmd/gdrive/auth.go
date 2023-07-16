@@ -19,18 +19,52 @@ import (
 	"google.golang.org/api/option"
 )
 
+const (
+	credpath  = "resources/credentials.json"
+	tokenpath = "resources/token.json"
+)
+
 var GDriveAuthCmd = &cobra.Command{
 	Use:   "auth",
 	Short: "Authenticate with Google Drive",
 	Long:  `Authenticate with Google Drive`,
-	Run:   GDriveAuthCommand,
+	Run:   newAuthCommand(),
 }
 
-func GDriveAuthCommand(cmd *cobra.Command, args []string) {
+type gdriveAuthCommand struct {
+	RenewToken bool
+}
+
+func init() {
+	GDriveAuthCmd.Flags().BoolP("renew", "r", false, "Renew the token")
+}
+
+func newAuthCommand() func(cmd *cobra.Command, args []string) {
+	c := &gdriveAuthCommand{}
+
+	return c.GDriveAuthCommand
+}
+
+func (c *gdriveAuthCommand) GDriveAuthCommand(cmd *cobra.Command, args []string) {
+	var err error
+
+	c.RenewToken, err = cmd.Flags().GetBool("renew")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	if c.RenewToken {
+		// delete token.json
+		err = os.Remove(tokenpath)
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
+
 	client, ctx := GetGDriveClient()
 
 	// Test creating a new GDrive client
-	_, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	_, err = drive.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		log.Fatalf("Unable to retrieve Drive client: %v", err)
 	}
@@ -38,7 +72,7 @@ func GDriveAuthCommand(cmd *cobra.Command, args []string) {
 
 func GetGDriveClient() (*http.Client, context.Context) {
 	ctx := context.Background()
-	b, err := os.ReadFile("resources/credentials.json")
+	b, err := os.ReadFile(credpath)
 	if err != nil {
 		log.Fatalf("Unable to read client secret file: %v", err)
 	}
@@ -136,19 +170,17 @@ func saveToken(path string, token *oauth2.Token) {
 
 // Retrieve a token, saves the token, then returns the generated client.
 func getClient(config *oauth2.Config) *http.Client {
-	filename := "resources/token.json"
-	tok, err := tokenFromFile(filename)
+	tok, err := tokenFromFile(tokenpath)
 	if err != nil {
 		tok = getTokenFromWeb(config)
-		saveToken(filename, tok)
+		saveToken(tokenpath, tok)
 	}
 
 	return config.Client(context.Background(), tok)
 }
 
 func GetClient(config *oauth2.Config) *http.Client {
-	filename := "resources/token.json"
-	token, err := GetTokenFromFile(filename)
+	token, err := GetTokenFromFile(tokenpath)
 	if err != nil {
 		log.Fatalf("Unable to retrieve token from file %v", err)
 	}
