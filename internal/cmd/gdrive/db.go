@@ -12,10 +12,13 @@ import (
 // this is the entry that the user sets
 type Syncable struct {
 	gorm.Model
-	LocalPath    string
-	GDrivePath   string
-	GDriveFileId string
-	IsFolder     bool
+	FileName       string
+	LocalPath      string
+	GDrivePath     string
+	GDriveFolder   string
+	GDriveFolderId string
+	GDriveId       string
+	IsFolder       bool
 }
 
 // this is the entry that is created by the program will always be a file.
@@ -24,9 +27,12 @@ type Syncable struct {
 type SyncableItem struct {
 	gorm.Model
 
-	LocalPath    string
-	GDrivePath   string
-	GDriveFileId string
+	FileName       string
+	LocalPath      string
+	GDrivePath     string
+	GDriveFolder   string
+	GDriveFolderId string
+	GDriveFileId   string
 
 	SyncableId int
 	Syncable   Syncable
