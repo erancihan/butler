@@ -1,9 +1,11 @@
 package gdrive
 
 import (
-	"io/ioutil"
+	gdrive_helpers "butler/internal/cmd/gdrive/helpers"
+	"fmt"
 	"log"
-	"strings"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/api/drive/v3"
@@ -51,8 +53,8 @@ func (c *command) GDriveSyncCommand(cmd *cobra.Command, args []string) {
 		log.Fatalf("Unable to retrieve Drive client: %v", err)
 	}
 
-	db := NewDB(DBOptions{}).db // get connection to db
-	tx := db.Begin()            // start transaction to update db after iteration
+	db := NewDB(DBOptions{ShouldMigrate: true}).db // get connection to db
+	tx := db.Begin()                               // start transaction to update db after iteration
 	{
 		rows, err := db.Model(&Syncable{}).Rows()
 		if err != nil {
@@ -73,93 +75,109 @@ func (c *command) GDriveSyncCommand(cmd *cobra.Command, args []string) {
 func (c *command) processSyncable(tx *gorm.DB, srv *drive.Service, syncable *Syncable) {
 	log.Printf("Syncing %s to %s\n", syncable.LocalPath, syncable.GDrivePath)
 
-	if (syncable.GDriveFileId == "" && syncable.IsFolder) || c.validate {
-		// create folders to store files in
-		log.Println("Creating folder")
-		c.driveCreateFolder(srv, syncable)
+	// first check SyncableItems for changes
+	rows, err := tx.Model(&SyncableItem{}).Where("syncable_id = ?", syncable.ID).Rows()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer rows.Close()
 
-		tx.Save(&syncable)
+	for rows.Next() {
+		var syncableItem SyncableItem
+		tx.ScanRows(rows, &syncableItem)
+
+		// check if file still exists
+		// TODO: file crud
+
+		fmt.Printf("%+v\n", syncableItem)
 	}
 
+	//
+	// once we have processed existing entries, we check for new ones
+	//
+	var files []string
 	if syncable.IsFolder {
-		// iterate over all files in the folder
-		files, err := ioutil.ReadDir(syncable.LocalPath)
+		files, err = gdrive_helpers.Glob(syncable.LocalPath)
 		if err != nil {
 			log.Fatalln(err)
-		}
-		for _, file := range files {
-			if file.IsDir() {
-				// dont recurse into folders
-				continue
-			}
-
-			// upload file to drive
-			log.Printf("Syncing %s\n", file.Name())
-
-			// check if file exists in drive
-			// if it does, check if it's the same
-			// if it's not... TODO:
 		}
 	} else {
-		// upload file to drive
-		// TODO:
+		// if syncable is a file, we should not have arrived here
+		// when adding a signle file for syncing, it should have been added to the db
+		// as a syncable item.
+		// which means we should have arrived at the first for loop, and not this one.
+		files = []string{}
 	}
-}
 
-func driveUploadFile(srv *drive.Service, src string, dest string) {
-
-}
-
-func (c *command) driveCreateFolder(srv *drive.Service, syncable *Syncable) {
-	// get drive path
-	gdpath := syncable.GDrivePath
-
-	// drive path can be nested
-	// split the path and create folders
-	// if they don't exist
-	folders := strings.Split(gdpath, "/")
-
-	parent := "root"
-	for i, folder := range folders {
-		if folder == "" {
-			// skip empty folders
+	// iterate through all files in the folder
+	for _, file := range files {
+		excludes := map[string]bool{
+			".git":       true,
+			".gitignore": true,
+			".gitkeep":   true,
+			".DS_Store":  true,
+		}
+		if excludes[filepath.Ext(file)] {
 			continue
 		}
 
-		q := "mimeType='application/vnd.google-apps.folder' and name='" + folder + "'"
-		if i > 0 {
-			q += " and '" + parent + "' in parents"
-		}
-		q += " and trashed=false"
-
-		response, err := srv.Files.List().Q(q).Do()
+		stat, err := os.Stat(file)
 		if err != nil {
 			log.Fatalln(err)
 		}
-
-		if len(response.Files) > 0 {
-			// folder exists
-			parent = response.Files[0].Id
+		if stat.IsDir() {
+			// skip if entry is a directory
 			continue
 		}
 
-		// folder doesn't exist, create it
-		file := &drive.File{
-			Name:     folder,
-			Parents:  []string{parent},
-			MimeType: "application/vnd.google-apps.folder",
-		}
-		if folder == "butler" && (i == 0 || i == 1) {
-			file.FolderColorRgb = "#4985e7"
+		// check if file exists in db
+		var syncableItem SyncableItem
+
+		tx.Find(&syncableItem, "local_path = ?", file)
+		if syncableItem.ID != 0 {
+			// file exists
+			continue
 		}
 
-		res, err := srv.Files.Create(file).Do()
+		// file does not exist, create
+		// remove syncable path from file path
+		//
+		// ensure syncable.LocalPath ends with a slash
+		if syncable.LocalPath[len(syncable.LocalPath)-1] != '/' {
+			syncable.LocalPath += "/"
+		}
+		// since this will always be a folder sync, we can assume that
+		// syncable's gdrivepath will always be a folder
+		if syncable.GDrivePath[len(syncable.GDrivePath)-1] != '/' {
+			syncable.GDrivePath += "/"
+		}
+
+		syncableItem.FileName = filepath.Base(file)
+		syncableItem.LocalPath = file
+		syncableItem.GDrivePath = syncable.GDrivePath + file[len(syncable.LocalPath):]
+		syncableItem.GDriveFolder = syncableItem.GDrivePath[0 : len(syncableItem.GDrivePath)-len(syncableItem.FileName)]
+
+		// upload file... in a goroutine... TODO
+		// upload one by one for now
+		//
+		// create an upload queue and upload in batches.
+		// sort the queue by file size and upload smallest first
+		// also have a max number of uploads at a time
+
+		// upload file
+		result, err := gdrive_helpers.Upload(&gdrive_helpers.UploadOptions{
+			Name:       syncableItem.FileName,
+			LocalPath:  syncableItem.LocalPath,
+			UploadPath: syncableItem.GDrivePath,
+			Service:    srv,
+		})
 		if err != nil {
 			log.Fatalln(err)
 		}
-		parent = res.Id
-	}
+		syncableItem.GDriveFolderId = result.FolderId
+		syncableItem.GDriveFileId = result.FileId
 
-	// update the file id
-	syncable.GDriveFileId = parent
+		tx.Save(&syncableItem)
+	}
+	tx.Commit()
 }
